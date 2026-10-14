@@ -463,8 +463,15 @@ public sealed class NativeSharedFlowTests(UIThreadFixture ui, ITestOutputHelper 
     private static async Task NavigatePreparedAiAsync(SetupWindow window, NativeGatewaySetupSession native)
     {
         await using var preparation = await GatewayAiPreparation.PrepareNativeAsync(native, CancellationToken.None);
-        typeof(SetupWindow).GetMethod("NavigateToNativeAiSetup", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(window, [native, preparation]);
+        var page = new NativeGatewaySetupPage();
+        Action<NativeAiPreparation> navigate = prepared =>
+            typeof(SetupWindow).GetMethod("NavigateToNativeAiSetup", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(window, [native, prepared]);
+        Func<CancellationToken, Task> authorize = native.AuthorizeAsync;
+        await Assert.IsAssignableFrom<Task>(
+            typeof(NativeGatewaySetupPage).GetMethod("CompleteAiPreparationAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(page, [preparation, null, native.IsIsolated ? native.Record : null,
+                    authorize, native.LifetimeToken, navigate, CancellationToken.None]));
     }
 
     private async Task WithPublishedReadyAsync(SetupWindow setupWindow, GatewayRegistry registry,
