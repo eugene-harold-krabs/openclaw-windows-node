@@ -245,6 +245,7 @@ public sealed class NativeSharedFlowTests(UIThreadFixture ui, ITestOutputHelper 
             await WithPublishedReadyAsync(window, registry, server, Assert.Single(completed), theme,
                 async (readyWindow, ready, navigated, _) =>
                 {
+                    await SetupWindowMinimumSizeTests.ResizeBelowMinimumAsync(readyWindow, ui, output, $"native-ready-{theme}");
                     Assert.Null(ready.FindName("NativeSummary"));
                     ready.UpdateLayout();
                     await OnboardingNativeProof.NextCompositionAsync(TimeSpan.FromMilliseconds(400));
@@ -502,7 +503,7 @@ public sealed class NativeSharedFlowTests(UIThreadFixture ui, ITestOutputHelper 
                     () => readyWindow!.DispatcherQueue.TryEnqueue(() => readyWindow.Invalidate())),
                 () => Assert.IsType<SetupReadyObservation>(observation).RequireCurrent(),
                 () => throw new InvalidOperationException("No Connection navigation expected.")));
-            readyWindow.AppWindow.Resize(setupWindow.AppWindow.Size);
+            SetupWindowMinimumSizeTests.AssertInitialWindowSize(readyWindow, output);
             readyWindow.Activate();
             readyWindow.AppWindow.Move(new(-32000, -32000));
             var readyFrame = Assert.IsType<Frame>(readyWindow.Content);
