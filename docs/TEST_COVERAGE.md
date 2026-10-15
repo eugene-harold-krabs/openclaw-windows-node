@@ -57,6 +57,11 @@ Restart-close and event-publication snapshots retain their connection resources
 until admitted operations finish. Concurrent disconnect/restart tests exercise
 the send-lock lifetime and preserve caller cancellation.
 
+Native-window screenshot proof keeps exact labels and the original immutable
+capture. Each of its two possible Windows OCR passes has a 30-second deadline
+for cold recognition on shared CI runners. Timeout or recognition failure is
+still a failed proof, never a skipped label check or a successful fallback.
+
 ### OpenClaw.Shared.Tests
 
 - **Command output-drain timing** - The unsupported-Windows runner fixture gates launcher release, then requires completion within three seconds of root exit while a descendant retains stdout, stderr, or both. Ten repetitions per case check short output and PID/start-time-bound child cleanup. The nonparallel `MxcOwnership` collection isolates these wall-clock budgets from unrelated tests. Native SDK finalization has separate managed ownership tests and opt-in runtime proof.
