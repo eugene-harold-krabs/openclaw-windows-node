@@ -63,6 +63,22 @@ jobs:
           BASELINE_FINGERPRINT: ${{ steps.previous.outputs.fingerprint }}
           OUTPUT_DIR: ${{ runner.temp }}/upstream-protocol
         run: node .github/scripts/upstream-gateway-protocol.cjs
+      - name: Report notification readiness without blocking polling
+        uses: actions/github-script@v9
+        env:
+          REPORT_DIR: ${{ runner.temp }}/upstream-protocol
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const { notificationReadiness } = require("./.github/scripts/upstream-gateway-publish.cjs");
+            const readiness = await notificationReadiness({ github, context });
+            if (readiness.status !== "received") core.warning(readiness.message);
+            const evidence = readiness.runUrl ? `\n\n[Observed publication dispatch](${readiness.runUrl})` : "";
+            fs.appendFileSync(path.join(process.env.REPORT_DIR, "report.md"),
+              `\n## Notification readiness: ${readiness.status}\n\n${readiness.message}${evidence}\n`);
+            fs.writeFileSync(path.join(process.env.REPORT_DIR, "notification-readiness.json"),
+              JSON.stringify(readiness, null, 2) + "\n");
       - name: Summarize observation
         env:
           REPORT: ${{ runner.temp }}/upstream-protocol/report.md

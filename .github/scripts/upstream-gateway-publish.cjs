@@ -52,6 +52,46 @@ async function boundedList(github, route, parameters) {
 
 function marker(fingerprint) { return `${MARKER}${fingerprint} -->`; }
 
+async function notificationReadiness({ github, context }) {
+  const received = (runId) => ({
+    status: "received",
+    runUrl: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${runId}`,
+    message: "A publication dispatch completed observation. This proves receipt, not sender identity, continued delivery or package-source binding.",
+  });
+  // Called only after this run's collector has validated its publication payload.
+  if (context.eventName === "repository_dispatch"
+    && context.payload.action === "gateway-protocol-published") return received(context.runId);
+  try {
+    const branch = context.payload.repository.default_branch;
+    const { data } = await github.request("GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs", {
+      ...context.repo, workflow_id: "upstream-gateway-protocol.yml",
+      branch, event: "repository_dispatch", per_page: 10,
+    });
+    if (!Array.isArray(data.workflow_runs)) fail("Unexpected notification run history");
+    for (const run of data.workflow_runs.slice(0, 10)) {
+      if (run.event !== "repository_dispatch" || run.head_branch !== branch
+        || run.path !== ".github/workflows/upstream-gateway-protocol.yml"
+        || !Number.isSafeInteger(run.id) || run.id <= 0) continue;
+      const { data: result } = await github.request("GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs", {
+        ...context.repo, run_id: run.id, filter: "latest", per_page: 100,
+      });
+      if (!Array.isArray(result.jobs)) fail("Unexpected notification job history");
+      // Overall runs may fail at the separate source-binding gate after collection.
+      if (result.jobs.some((job) => job.name === "observe" && job.conclusion === "success"))
+        return received(run.id);
+    }
+    return {
+      status: "unverified",
+      message: "Notification delivery is unverified: no successful observation was found in the latest 10 retained publication-dispatch runs. The upstream sender must be merged, its GitHub App configured, and a real publication delivered. Nightly polling still works independently; this is not a Gateway compatibility failure.",
+    };
+  } catch {
+    return {
+      status: "unknown",
+      message: "Notification readiness could not be checked because the GitHub delivery-history lookup failed. Check Actions read permissions and GitHub availability. Nightly polling is unaffected; sender readiness must not be assumed.",
+    };
+  }
+}
+
 async function ensureLabel(github, repo, name) {
   try {
     await github.request("GET /repos/{owner}/{repo}/labels/{name}", { ...repo, name });
@@ -303,4 +343,4 @@ ${coverageNote}
   return data.number;
 }
 
-module.exports = { publish, handoff, findBaseline, publishFailure, decide, marker, LABEL, INSTRUCTIONS };
+module.exports = { publish, handoff, findBaseline, publishFailure, notificationReadiness, decide, marker, LABEL, INSTRUCTIONS };

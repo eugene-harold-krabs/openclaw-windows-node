@@ -133,6 +133,27 @@ authorized to send the event. Receiver tests do not establish sender delivery.
 They also do not establish independent package-source binding, which remains
 required before implementation publication/handoff can run.
 
+### Notification readiness warning
+
+Each collected report includes a **Notification readiness** section in its run
+summary and `report.md`, with structured evidence in `notification-readiness.json`
+in the same artifact. Missing or unverifiable delivery produces a warning only,
+not a failed observation, health issue or implementation task. Nightly polling
+does not depend on the upstream sender being merged.
+
+The check accepts the current validated publication observation or looks through
+the latest 10 retained publication-dispatch runs of this workflow on the default
+branch for a successful `observe` job. An overall failed run can still prove
+receipt when its later source-binding gate failed. No observed delivery means
+**unverified**, not proof that the sender is absent: merge the upstream sender,
+configure its GitHub App and verify a real publication dispatch. API lookup
+failures are explicitly reported as **unknown** warnings.
+
+Observed receipt links to its run. It does not authenticate which sender caused
+that run, prove continued delivery, or establish package-source binding. Old or
+deleted Actions history can cause the warning to return. This check does not
+change the separate source-binding failure or enable automatic remediation.
+
 ### Concrete source-identity discrepancy and report version
 
 For both `openclaw@2026.9.9` and `@openclaw/gateway-protocol@2026.9.9`,

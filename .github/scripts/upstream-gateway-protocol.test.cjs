@@ -95,6 +95,110 @@ function mock(routes) {
   };
 }
 
+test("notification readiness warns without writes when the sender has not delivered", async () => {
+  const github = mock({
+    "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs": { workflow_runs: [] },
+  });
+  const result = await publisher.notificationReadiness({ github, context });
+  assert.equal(result.status, "unverified");
+  assert.match(result.message, /sender must be merged/);
+  assert.match(result.message, /not a Gateway compatibility failure/);
+  assert.equal(github.calls.length, 1);
+  assert.equal(github.calls[0].args.event, "repository_dispatch");
+  assert.equal(github.calls[0].args.branch, "main");
+  assert.equal(github.calls[0].args.per_page, 10);
+});
+
+test("current validated publication observation establishes receipt without querying history", async () => {
+  const github = mock({});
+  const result = await publisher.notificationReadiness({
+    github, context: { ...context, eventName: "repository_dispatch",
+      payload: { ...context.payload, action: "gateway-protocol-published" } },
+  });
+  assert.equal(result.status, "received");
+  assert.equal(result.runUrl, "https://github.com/openclaw/openclaw-windows-node/actions/runs/123");
+  assert.match(result.message, /not sender identity, continued delivery or package-source binding/);
+  assert.equal(github.calls.length, 0);
+});
+
+test("notification receipt uses the observation job, not later remediation failure", async () => {
+  const github = mock({
+    "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs": {
+      workflow_runs: [{ id: 12, event: "repository_dispatch", head_branch: "main",
+        path: ".github/workflows/upstream-gateway-protocol.yml", conclusion: "failure" }],
+    },
+    "GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs": {
+      jobs: [{ name: "observe", conclusion: "success" }, { name: "publish", conclusion: "failure" }],
+    },
+  });
+  const result = await publisher.notificationReadiness({ github, context });
+  assert.equal(result.status, "received");
+  assert.match(result.runUrl, /\/12$/);
+  assert.equal(github.calls[1].args.filter, "latest");
+});
+
+test("untrusted, skipped and failed observations do not prove notification readiness", async () => {
+  const run = { id: 12, event: "repository_dispatch", head_branch: "main",
+    path: ".github/workflows/upstream-gateway-protocol.yml" };
+  const github = mock({
+    "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs": {
+      workflow_runs: [
+        { ...run, event: "schedule" }, { ...run, head_branch: "feature" },
+        { ...run, path: ".github/workflows/other.yml" }, { ...run, id: "untrusted" }, run,
+      ],
+    },
+    "GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs": {
+      jobs: [{ name: "observe", conclusion: "failure" }, { name: "observe", conclusion: "skipped" },
+        { name: "publish", conclusion: "success" }],
+    },
+  });
+  const result = await publisher.notificationReadiness({ github, context });
+  assert.equal(result.status, "unverified");
+  assert.equal(github.calls.length, 2);
+});
+
+test("notification history failures are explicit warnings rather than polling failures", async () => {
+  for (const response of [
+    () => { throw Object.assign(new Error("private upstream error"), { status: 403 }); },
+    {},
+  ]) {
+    const github = mock({
+      "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs": response,
+    });
+    const result = await publisher.notificationReadiness({ github, context });
+    assert.equal(result.status, "unknown");
+    assert.match(result.message, /lookup failed/);
+    assert.doesNotMatch(result.message, /private upstream error/);
+  }
+});
+
+test("notification readiness history is bounded even if GitHub returns extra runs", async () => {
+  const github = mock({
+    "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs": {
+      workflow_runs: Array.from({ length: 15 }, (_, index) => ({
+        id: index + 1, event: "repository_dispatch", head_branch: "main",
+        path: ".github/workflows/upstream-gateway-protocol.yml",
+      })),
+    },
+    "GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs": { jobs: [] },
+  });
+  assert.equal((await publisher.notificationReadiness({ github, context })).status, "unverified");
+  assert.equal(github.calls.length, 11);
+});
+
+test("workflow preserves notification warnings in report artifacts after validated collection", () => {
+  const workflow = fs.readFileSync(path.join(__dirname, "../workflows/upstream-gateway-protocol.yml"), "utf8");
+  const start = workflow.indexOf("- name: Report notification readiness");
+  const end = workflow.indexOf("- name: Summarize observation");
+  assert.ok(start > workflow.indexOf("run: node .github/scripts/upstream-gateway-protocol.cjs"));
+  assert.ok(end > start);
+  const step = workflow.slice(start, end);
+  assert.match(step, /core\.warning\(readiness\.message\)/);
+  assert.doesNotMatch(step, /setFailed|exit 1|continue-on-error/);
+  assert.match(step, /appendFileSync[\s\S]*"report\.md"/);
+  assert.match(step, /"notification-readiness\.json"/);
+});
+
 function tarball(document, member = "package/protocol.schema.json", type = "0") {
   const content = Buffer.from(JSON.stringify(document));
   const header = Buffer.alloc(512);
