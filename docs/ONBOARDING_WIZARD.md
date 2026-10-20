@@ -471,11 +471,15 @@ Page drain, selection
 verification, runtime startup and published-owner handoff are distinct lifetimes.
 
 `SetupNativeCompletionTiming` defines the published path's enforced phase ceilings:
-210 seconds for the first borrow, 210 seconds to join already-admitted Local AI
-recovery, 210 seconds for a fresh post-recovery borrow, 150 seconds for exact-model
+210 seconds for the first borrow, 1020 seconds to join already-admitted Local AI
+recovery (including two guarded Gateway restarts and router startup), 210 seconds
+for a fresh post-recovery borrow, 150 seconds for exact-model
 verification (including the existing 120-second RPC and authorization), and
-30 seconds for navigation. Their 810-second total bounds the exclusive execution
-lease. A phase can fail earlier due to its underlying owner or caller cancellation;
+30 seconds for navigation. Their 1620-second total bounds the exclusive execution
+lease. Existing retry records retain their original 810-second deadline. An ordinary
+Gateway selection joins only startup admitted for its WSL Gateway; a matching saved
+Local AI install alone does not make it depend on the companion runtime. A phase can
+fail earlier due to its underlying owner or caller cancellation;
 unused phase time is not a guarantee that a different phase may overrun its ceiling.
 Recovery waits never initiate or replay a provider mutation.
 Timeouts retain a typed, finite phase (page drain, connection, Local AI recovery,
