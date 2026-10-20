@@ -38,11 +38,9 @@ public static class SetupNativeCompletionVerifier
                 token => GatewayAiSetupTransport.BorrowAsync(dataDir, connectionManager, native.Id, token,
                     expected.EndpointBinding, SetupNativeCompletionTiming.Connection, readOnlyRequests: captureReadiness),
                 SetupNativeCompletionTiming.Connection, SetupNativeCompletionPhase.Connection, ct, timeProvider);
-            progress?.Report(SetupLoadingStep.ConnectGateway);
-            var transport = await BorrowAsync();
-            SetupNativeVerification.RequireRoute(expected, transport.Route);
-            if (waitForModel is not null)
+            async Task WaitForModelAsync()
             {
+                if (waitForModel is null) return;
                 if (expected.RequiresManagedLocalAi) progress?.Report(SetupLoadingStep.RecoverLocalAi);
                 await SetupNativeCompletionTiming.RunAsync(async token =>
                     {
@@ -50,6 +48,17 @@ public static class SetupNativeCompletionVerifier
                         return true;
                     }, SetupNativeCompletionTiming.ModelRecovery, SetupNativeCompletionPhase.ModelRecovery, ct, timeProvider);
                 RequireOwner();
+            }
+            // WSL recovery may withdraw the provider and restart the Gateway.
+            // Its first authenticated borrow must follow recovery.
+            var waitBeforeBorrow = captureReadiness && native.NativePackageFamilyName is null;
+            if (waitBeforeBorrow) await WaitForModelAsync();
+            progress?.Report(SetupLoadingStep.ConnectGateway);
+            var transport = await BorrowAsync();
+            SetupNativeVerification.RequireRoute(expected, transport.Route);
+            if (!waitBeforeBorrow && waitForModel is not null)
+            {
+                await WaitForModelAsync();
                 // Model recovery can publish a new port and restart the Gateway.
                 // Never verify on the pre-recovery handshake.
                 progress?.Report(SetupLoadingStep.ReconnectGateway);

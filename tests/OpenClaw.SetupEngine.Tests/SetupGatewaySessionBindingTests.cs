@@ -75,6 +75,57 @@ public sealed class SetupGatewaySessionBindingTests
             route.ReadyBinding!.RequireCurrentAsync(deadline.Token));
     }
 
+    [Fact]
+    public async Task PublishedWslReadyWaitsForModelRecoveryBeforeBorrowingGateway()
+    {
+        using var temp = new TempDirectory();
+        await using var server = await FixtureGatewayServer.StartAsync(GatewayScenario.CreateNativeSetup(SetupReply), Token);
+        var registry = new GatewayRegistry(temp.Path);
+        var record = registry.AddOrUpdate(new()
+        {
+            Id = "published-wsl", Url = server.Endpoint.ToString(), SharedGatewayToken = Token,
+            SetupManagedDistroName = "fixture-owned-distro",
+        });
+        registry.SetActive(record.Id);
+        registry.Save();
+        await using var manager = new GatewayConnectionManager(
+            new CredentialResolver(DeviceIdentityFileReader.Instance), new GatewayClientFactory(), registry, NullLogger.Instance,
+            endpointProvenanceProbe: (_, _) => Task.FromResult(new GatewayEndpointProvenance(
+                GatewayEndpointProvenanceKind.ExpectedManagedGateway, server.Endpoint.Port)));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await manager.ConnectAsync(record.Id);
+        var transport = await GatewayAiSetupTransport.BorrowAsync(temp.Path, manager, record.Id, deadline.Token,
+            GatewayDashboardBinding.Capture(record), readOnlyRequests: true);
+        var client = new GatewayAiSetupClient(transport, Model);
+        Assert.True((await client.VerifyConfiguredAsync(Model, deadline.Token)).Ok);
+        var proof = client.GetVerifiedCompletion();
+        await manager.DisconnectAsync();
+        var connectionsBeforeRecovery = server.ConnectionCount;
+        var recoveryEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishRecovery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var verifying = SetupNativeCompletionVerifier.VerifyAsync(temp.Path, proof, deadline.Token, manager,
+            async (_, ct) =>
+            {
+                recoveryEntered.SetResult();
+                await finishRecovery.Task.WaitAsync(ct);
+            }, captureReadiness: true);
+        try
+        {
+            await recoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(connectionsBeforeRecovery, server.ConnectionCount);
+            await manager.ConnectAsync(record.Id, deadline.Token);
+            finishRecovery.SetResult();
+            var ready = await verifying;
+            Assert.NotNull(ready.ReadyBinding);
+        }
+        finally
+        {
+            finishRecovery.TrySetResult();
+            try { await verifying.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception) when (verifying.IsCompleted) { }
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
