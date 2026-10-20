@@ -437,31 +437,42 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentNullException.ThrowIfNull(data);
-        var eventData = JsonSerializer.SerializeToElement(data);
-        var approvalId = ReadString(eventData, "approvalId");
-        if (ReadString(eventData, "phase") == "requested"
-            && approvalId is { Length: <= 64 }
-            && approvalId.StartsWith("fixture-", StringComparison.Ordinal))
+        var targets = AcquireConnections(onlyOpen: true);
+        try
         {
-            lock (_sync)
-                _issuedApprovalIds.Add(approvalId);
-        }
+            if (targets.Length == 0)
+                throw new InvalidOperationException("No authenticated fixture connection is available.");
 
-        var message = new
-        {
-            type = "event",
-            @event = "agent",
-            payload = new
+            var eventData = JsonSerializer.SerializeToElement(data);
+            var approvalId = ReadString(eventData, "approvalId");
+            if (ReadString(eventData, "phase") == "requested"
+                && approvalId is { Length: <= 64 }
+                && approvalId.StartsWith("fixture-", StringComparison.Ordinal))
             {
-                runId = "",
-                seq = 0,
-                stream = "approval",
-                ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                sessionKey,
-                data = eventData,
-            },
-        };
-        await PublishEventAsync(message, cancellationToken);
+                lock (_sync)
+                    _issuedApprovalIds.Add(approvalId);
+            }
+
+            var message = new
+            {
+                type = "event",
+                @event = "agent",
+                payload = new
+                {
+                    runId = "",
+                    seq = 0,
+                    stream = "approval",
+                    ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    sessionKey,
+                    data = eventData,
+                },
+            };
+            await PublishEventAsync(targets, message, cancellationToken);
+        }
+        finally
+        {
+            ReleaseConnections(targets);
+        }
     }
 
     public Task NotifySessionsChangedAsync(CancellationToken cancellationToken = default) =>
@@ -644,7 +655,8 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
                 }
             }
             catch (OperationCanceledException) when (connection.IsCancellationRequested) { }
-            catch (WebSocketException) when (socket?.State is WebSocketState.Aborted or WebSocketState.Closed) { }
+            catch (WebSocketException) when (activeConnection is null ||
+                socket?.State is WebSocketState.Aborted or WebSocketState.Closed) { }
             catch (IOException) when (connection.IsCancellationRequested) { }
             catch (InvalidDataException) when (socket is null)
             {
