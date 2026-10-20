@@ -39,6 +39,8 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
     private readonly Dictionary<string, TaskCompletionSource> _historyGates = new(StringComparer.Ordinal);
     private TaskCompletionSource? _sessionMutationGate;
     private TaskCompletionSource? _chatSendGate;
+    private TaskCompletionSource<bool>? _chatAbortGate;
+    private int _chatEventSequence;
     private TaskCompletionSource? _nextSessionListGate;
     private TaskCompletionSource? _heldSessionList;
     private TaskCompletionSource? _sessionListCaptured;
@@ -269,6 +271,82 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
         }
     }
 
+    public void HoldChatAborts()
+    {
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposal is not null, this);
+            if (_chatAbortGate is not null)
+                throw new InvalidOperationException("Chat aborts are already held.");
+            _chatAbortGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    public void ReleaseChatAborts(bool fail = false)
+    {
+        lock (_sync)
+        {
+            var gate = _chatAbortGate ?? throw new InvalidOperationException("Chat aborts are not held.");
+            _chatAbortGate = null;
+            gate.TrySetResult(fail);
+        }
+    }
+
+    public Task PublishChatRunEventAsync(string sessionKey, string runId, string stream, object data,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateChatRun(sessionKey, runId);
+        if (stream is not ("lifecycle" or "assistant" or "tool"))
+            throw new ArgumentException("Expected a lifecycle, assistant or tool stream.", nameof(stream));
+        ArgumentNullException.ThrowIfNull(data);
+        return PublishEventAsync(new
+        {
+            type = "event", @event = "agent",
+            payload = new
+            {
+                sessionKey, runId, stream, data,
+                seq = Interlocked.Increment(ref _chatEventSequence),
+                ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            }
+        }, cancellationToken);
+    }
+
+    public Task PublishChatFinalAsync(string sessionKey, string runId, string text,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateChatRun(sessionKey, runId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        return PublishEventAsync(new
+        {
+            type = "event", @event = "chat",
+            payload = new { sessionKey, runId, state = "final", message = new { role = "assistant", content = text } }
+        }, cancellationToken);
+    }
+
+    private void ValidateChatRun(string sessionKey, string runId)
+    {
+        if (!_scenario.ContainsChatRun(sessionKey, runId))
+            throw new ArgumentException("Chat run was not issued for this fixture session.", nameof(runId));
+    }
+
+    public Task PublishChatContentAsync(string sessionKey, string runId, IReadOnlyList<object> content,
+        bool isFinal, CancellationToken cancellationToken = default)
+    {
+        ValidateChatRun(sessionKey, runId);
+        ArgumentNullException.ThrowIfNull(content);
+        if (content.Count == 0)
+            throw new ArgumentException("Chat content must contain at least one block.", nameof(content));
+        return PublishEventAsync(new
+        {
+            type = "event", @event = "chat",
+            payload = new
+            {
+                sessionKey, runId, state = isFinal ? "final" : "delta",
+                message = new { role = "assistant", content }
+            }
+        }, cancellationToken);
+    }
+
     /// <summary>Hold one listing snapshot while subsequent requests remain independent.</summary>
     public Task HoldNextSessionList()
     {
@@ -359,17 +437,6 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionKey);
         ArgumentNullException.ThrowIfNull(data);
-        var targets = AcquireConnections(onlyOpen: true);
-        try { await PublishAgentEventCoreAsync(targets, sessionKey, data, cancellationToken); }
-        finally { ReleaseConnections(targets); }
-    }
-
-    private async Task PublishAgentEventCoreAsync(
-        ActiveConnection[] targets, string sessionKey, object data, CancellationToken cancellationToken)
-    {
-        if (targets.Length == 0)
-            throw new InvalidOperationException("No authenticated fixture connection is available.");
-
         var eventData = JsonSerializer.SerializeToElement(data);
         var approvalId = ReadString(eventData, "approvalId");
         if (ReadString(eventData, "phase") == "requested"
@@ -394,21 +461,7 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
                 data = eventData,
             },
         };
-        foreach (var target in targets)
-        {
-            try
-            {
-                using var send = CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationToken, target.CancellationToken);
-                await SendAsync(target.Socket, target.SendLock, message, send.Token);
-                return;
-            }
-            catch (OperationCanceledException) when (target.CancellationToken.IsCancellationRequested) { }
-            catch (ObjectDisposedException) { }
-            catch (WebSocketException) { }
-        }
-
-        throw new InvalidOperationException("Authenticated fixture connections closed before the event was sent.");
+        await PublishEventAsync(message, cancellationToken);
     }
 
     public Task NotifySessionsChangedAsync(CancellationToken cancellationToken = default) =>
@@ -416,15 +469,19 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
 
     private async Task PublishEventAsync(object message, CancellationToken cancellationToken)
     {
-        ActiveConnection[] targets;
-        lock (_sync)
-            targets = _authenticatedConnections
-                .OrderByDescending(pair => pair.Key)
-                .Select(pair => pair.Value)
-                .Where(connection => connection.Socket.State == WebSocketState.Open)
-                .ToArray();
-        if (targets.Length == 0)
-            throw new InvalidOperationException("No authenticated fixture connection is available.");
+        var targets = AcquireConnections(onlyOpen: true);
+        try
+        {
+            if (targets.Length == 0)
+                throw new InvalidOperationException("No authenticated fixture connection is available.");
+            await PublishEventAsync(targets, message, cancellationToken);
+        }
+        finally { ReleaseConnections(targets); }
+    }
+
+    private static async Task PublishEventAsync(
+        ActiveConnection[] targets, object message, CancellationToken cancellationToken)
+    {
         foreach (var target in targets)
         {
             try
@@ -568,6 +625,7 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
                     }
 
                     Task? gate;
+                    Task<bool>? abortOutcome;
                     lock (_sync)
                     {
                         gate = method is "sessions.patch" or "sessions.delete" or "sessions.create"
@@ -577,10 +635,12 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
                             : method == "sessions.list" ? _nextSessionListGate?.Task
                             : method == "chat.history" && key is not null && _historyGates.TryGetValue(key, out var held)
                                 ? held.Task : null;
+                        abortOutcome = method == "chat.abort" ? _chatAbortGate?.Task : null;
                         if (method == "sessions.list") _nextSessionListGate = null;
                     }
                     pending.RemoveAll(task => task.IsCompletedSuccessfully);
-                    pending.Add(RespondAsync(socket, sendLock, id!, method!, parameters, requestIndex, connectionId, gate, connection.Token));
+                    pending.Add(RespondAsync(socket, sendLock, id!, method!, parameters, requestIndex, connectionId,
+                        gate, abortOutcome, connection.Token));
                 }
             }
             catch (OperationCanceledException) when (connection.IsCancellationRequested) { }
@@ -628,7 +688,7 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
 
     private async Task RespondAsync(
         WebSocket socket, SemaphoreSlim sendLock, string id, string method, JsonElement parameters,
-        int requestIndex, int connectionId, Task? gate, CancellationToken cancellationToken)
+        int requestIndex, int connectionId, Task? gate, Task<bool>? abortOutcome, CancellationToken cancellationToken)
     {
         try
         {
@@ -685,6 +745,13 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
                 lock (_sync) _sessionListCaptured?.TrySetResult();
             if (gate is not null)
                 await gate.WaitAsync(cancellationToken);
+            if (abortOutcome is not null && await abortOutcome.WaitAsync(cancellationToken))
+            {
+                await SendErrorAsync(socket, sendLock, id, "FIXTURE_ABORT_FAILED",
+                    "Fixture abort rejected.", cancellationToken);
+                Complete(requestIndex, "error:FIXTURE_ABORT_FAILED");
+                return;
+            }
             var reply = payload as FixtureReply;
             try
             {
@@ -889,6 +956,8 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
             _sessionMutationGate = null;
             _chatSendGate?.TrySetCanceled();
             _chatSendGate = null;
+            _chatAbortGate?.TrySetCanceled();
+            _chatAbortGate = null;
         }
         await _acceptLoop;
         Task[] connections;
