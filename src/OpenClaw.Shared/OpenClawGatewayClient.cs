@@ -1749,8 +1749,8 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         object parameters = AdvertisedServerCapabilities.Contains(
             "published-model-catalog",
             StringComparer.Ordinal)
-            ? new { sessionKey, includeDetails = true }
-            : new { sessionKey };
+            ? new { sessionKey, view = "configured", includeDetails = true }
+            : new { sessionKey, view = "configured" };
         var payload = await SendWizardRequestAsync(
             "models.list",
             parameters,

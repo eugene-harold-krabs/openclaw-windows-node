@@ -17,7 +17,8 @@ public sealed class GatewayFixtureProfile : IDisposable
     public string RunId { get; } = Guid.NewGuid().ToString("N");
     public string RunDirectory => _directory.Path;
     public string DataDirectory => _directory.Combine("profile");
-    public string SetupDirectory => _directory.Combine("setup-local");
+    public string LocalRoot => _directory.Combine("local");
+    public string SetupDirectory => Path.Combine(LocalRoot, "OpenClawTray");
     public string GatewayId { get; } = Guid.NewGuid().ToString();
     public Uri GatewayEndpoint { get; }
 
@@ -100,6 +101,7 @@ public sealed class GatewayFixtureProfile : IDisposable
         start.Environment["OPENCLAW_TRAY_DATA_DIR"] = DataDirectory;
         start.Environment["OPENCLAW_TRAY_LOCAL_DATA_DIR"] = SetupDirectory;
         start.Environment["OPENCLAW_TRAY_APPDATA_DIR"] = _directory.Combine("roaming");
+        start.Environment["OPENCLAW_TRAY_LOCALAPPDATA_DIR"] = LocalRoot;
         start.Environment["OPENCLAW_MCP_PORT"] = mcpPort.ToString(CultureInfo.InvariantCulture);
         start.Environment["OPENCLAW_SKIP_UPDATE_CHECK"] = "1";
         start.Environment["OPENCLAW_SUPPRESS_EXTERNAL_BROWSER"] = "1";

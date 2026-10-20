@@ -76,6 +76,10 @@ controls. They verify:
 - Independent profiles, endpoints, tokens and preferences in two concurrent
   application instances. Stopping one must leave the other usable.
 - Repeated A/B session selection and session-specific visible histories.
+- Session-scoped configured model reads retain a current model outside the manual
+  selection policy. Its label and catalog-only reasoning remain available while
+  its picker row stays disabled. The fixture's omitted view uses `default`, like
+  the Gateway, so omitting `view: "configured"` cannot accidentally pass this case.
 - Natural initial-tail visibility of message 240 before any explicit scroll
   command, plus final-message visibility after scrolling at two window sizes.
 - Sessions/Settings/Configuration/Chat navigation, profile-only preference
@@ -144,8 +148,13 @@ The important controls are:
 | `OPENCLAW_TRAY_DATA_DIR` | Synthetic settings, registry, identities, MCP token, logs, caches and instance mutex. |
 | `OPENCLAW_TRAY_LOCAL_DATA_DIR` | Separate synthetic setup/Local AI state. |
 | `OPENCLAW_TRAY_APPDATA_DIR` | Isolated roaming fallback root. |
+| `OPENCLAW_TRAY_LOCALAPPDATA_DIR` | Isolated local app-data fallback root. |
 | `OPENCLAW_MCP_PORT` | Dedicated, non-default MCP port. |
 | Runtimeconfig `OpenClaw.GatewayFixtureIsolationVersion=1` | Preflight rejects old binaries before they can execute unguarded startup paths. |
+
+The local app-data root and legacy direct-folder alias must resolve to the same
+effective directory (`<local-root>\OpenClawTray`). The guard rejects conflicting
+overrides instead of validating a directory that SetupEngine would not use.
 
 WSL keepalive/startup cleanup and Windows autostart writes are explicitly
 guarded. A loopback URL alone is not enough to prevent the regular keepalive

@@ -94,6 +94,31 @@ public sealed class GatewayFixtureUiTests(ITestOutputHelper output)
 
     [GatewayFixtureUiFact]
     [Trait("Category", "GatewayFixture")]
+    public async Task CurrentModelOutsideManualPolicyRetainsLabelAndReasoning()
+    {
+        await WithAppAsync(async run =>
+        {
+            await run.InvokeAsync("app.navigate", new { page = "chat" });
+            await SelectSessionAsync(run, GatewayScenario.EdgeTitle, GatewayScenario.EdgeSessionKey);
+            await WaitUiAsync(run, () => FindById(run, "ChatComposerModelPicker") is { } picker
+                && picker.Current.IsEnabled
+                && picker.Current.Name == "Model: Fixture Retained Research", "retained current-model label");
+            await WaitUiAsync(run, () => FindById(run, "ChatComposerReasoningPicker")?.Current.IsEnabled == true,
+                "reasoning from retained model metadata");
+            Invoke(FindById(run, "ChatComposerModelPicker")!);
+            await WaitUiAsync(run, () => FindById(run, "ChatModelChoice_fixture/research") is { } choice
+                && !choice.Current.IsEnabled
+                && choice.Current.Name.Contains("Fixture Retained Research", StringComparison.Ordinal),
+                "visible but nonselectable current model");
+            Assert.Contains(run.Gateway.Requests, request => request.Method == "models.list"
+                && request.SessionKey == GatewayScenario.EdgeSessionKey
+                && request.ModelCatalogView == "configured");
+            await CaptureIfRequestedAsync(run, "retained-current-model-catalog.png");
+        });
+    }
+
+    [GatewayFixtureUiFact]
+    [Trait("Category", "GatewayFixture")]
     public async Task SessionsAddRequiresExplicitAssistantSelection()
     {
         await WithAppAsync(async run =>

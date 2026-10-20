@@ -13,7 +13,9 @@ public sealed record GatewayFixtureRequest(
     string? SessionKey,
     string Outcome,
     string? Decision = null,
-    string? ApprovalId = null);
+    string? ApprovalId = null,
+    string? ModelCatalogView = null,
+    bool? IncludeModelDetails = null);
 
 /// <summary>
 /// An independently owned, operator-only loopback Gateway. Responses are selected by
@@ -323,7 +325,13 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
                         method!,
                         _scenario.ContainsSession(key ?? "") ? key : key is null ? null : "<unknown>",
                         SafeApprovalDecision(method!, parameters),
-                        SafeApprovalId(method!, parameters));
+                        SafeApprovalId(method!, parameters),
+                        method == "models.list" && ReadString(parameters, "view") is "default" or "configured" or "all"
+                            ? ReadString(parameters, "view") : null,
+                        method == "models.list" && parameters.ValueKind == JsonValueKind.Object
+                            && parameters.TryGetProperty("includeDetails", out var details)
+                            && details.ValueKind is JsonValueKind.True or JsonValueKind.False
+                                ? details.GetBoolean() : null);
                     if (!authenticated || method == "connect")
                     {
                         try
@@ -473,12 +481,15 @@ public sealed class FixtureGatewayServer : IAsyncDisposable
         string method,
         string? key,
         string? decision = null,
-        string? approvalId = null)
+        string? approvalId = null,
+        string? modelCatalogView = null,
+        bool? includeModelDetails = null)
     {
         lock (_sync)
         {
             var index = _requests.Count;
-            _requests.Add(new GatewayFixtureRequest(method, key, "pending", decision, approvalId));
+            _requests.Add(new GatewayFixtureRequest(method, key, "pending", decision, approvalId,
+                modelCatalogView, includeModelDetails));
             SignalRequestChanged();
             return index;
         }

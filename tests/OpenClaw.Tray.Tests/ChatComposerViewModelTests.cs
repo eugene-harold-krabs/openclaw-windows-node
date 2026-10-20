@@ -63,8 +63,10 @@ public sealed class ChatComposerViewModelTests
         Assert.Equal(1, vm.DraftRevision);
     }
 
-    [Fact]
-    public void ThinkingProfile_UsesTheSessionScopedCatalog()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ThinkingProfile_UsesTheSessionScopedCatalogEvenWhenManualSelectionIsDenied(bool manualSelectionAllowed)
     {
         var vm = new ChatComposerViewModel(new RecordingUiDispatcher(), initialSpeakerMuted: false);
         var inputs = MakeInputs(
@@ -78,6 +80,7 @@ public sealed class ChatComposerViewModelTests
                 "worker",
                 "Worker",
                 Provider: "fixture",
+                ManualSelectionAllowed: manualSelectionAllowed,
                 ThinkingContext: new(
                     new("fixture", "worker"),
                     new([new("high", "High")])))]));
@@ -85,6 +88,7 @@ public sealed class ChatComposerViewModelTests
         var levels = vm.ThinkingProfile!.Levels;
         Assert.True(levels.HasValue);
         Assert.Equal("high", Assert.Single(levels.Value).Id);
+        Assert.Equal(manualSelectionAllowed, Assert.Single(vm.SessionModelCatalog!.Choices).IsSelectable);
     }
 
     [Fact]

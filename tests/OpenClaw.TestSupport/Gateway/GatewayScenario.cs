@@ -47,6 +47,7 @@ public sealed class GatewayScenario
     ];
 
     private readonly bool _allowAgentCreation;
+    private readonly bool _publishedModelCatalog;
     private readonly List<object> _createdAgents = [];
 
     public string Name => _setup is not null ? "native-setup" : _allowAgentCreation ? "agent-creation" : BrowseName;
@@ -59,12 +60,14 @@ public sealed class GatewayScenario
     public IReadOnlyList<string> ReadMethods { get; }
 
     private GatewayScenario(Session[] sessions, IReadOnlyDictionary<string, JsonElement> reads,
-        Func<string, JsonElement, object>? setup = null, bool advertiseSetup = true, bool allowAgentCreation = false)
+        Func<string, JsonElement, object>? setup = null, bool advertiseSetup = true, bool allowAgentCreation = false,
+        bool publishedModelCatalog = false)
     {
         _sessions = sessions;
         _reads = reads;
         _setup = setup;
         _allowAgentCreation = allowAgentCreation;
+        _publishedModelCatalog = publishedModelCatalog;
         SessionKeys = Array.AsReadOnly(sessions.Select(s => s.Key).ToArray());
         ReadMethods = Array.AsReadOnly(new[]
         {
@@ -74,7 +77,7 @@ public sealed class GatewayScenario
             ? SetupMethods : ["wizard.start", "wizard.next", "wizard.cancel", "logs.tail"]).Order(StringComparer.Ordinal).ToArray());
         var source = JsonSerializer.Serialize(new
         {
-            Name, Version, ProtocolVersion, ContractProvenance,
+            Name, Version, ProtocolVersion, ContractProvenance, publishedModelCatalog,
             sessions = sessions.Select(s => new { s.Row, s.Messages }), reads
         });
         Sha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
@@ -90,7 +93,8 @@ public sealed class GatewayScenario
         return new(browse._sessions, browse._reads, responder, advertiseSetup);
     }
 
-    public static GatewayScenario CreateBrowse(bool allowAgentCreation = false, bool requireAgentSelection = false)
+    public static GatewayScenario CreateBrowse(bool allowAgentCreation = false, bool requireAgentSelection = false,
+        bool publishedModelCatalog = false)
     {
         Session[] sessions =
         [
@@ -224,7 +228,8 @@ public sealed class GatewayScenario
                 version = "fixture-1", generatedAt = Epoch.ToString("O")
             })
         };
-        return new GatewayScenario(sessions, reads, allowAgentCreation: allowAgentCreation);
+        return new GatewayScenario(sessions, reads, allowAgentCreation: allowAgentCreation,
+            publishedModelCatalog: publishedModelCatalog);
     }
 
     internal object CreateHello(string connectionId) => new
@@ -236,7 +241,9 @@ public sealed class GatewayScenario
         {
             methods = ReadMethods,
             events = new[] { "connect.challenge", "sessions.changed", "agent" },
-            capabilities = new[] { "session-scoped-model-catalog" },
+            capabilities = _publishedModelCatalog
+                ? new[] { "session-scoped-model-catalog", "published-model-catalog" }
+                : new[] { "session-scoped-model-catalog" },
         },
         snapshot = new
         {
@@ -371,14 +378,32 @@ public sealed class GatewayScenario
     private object Models(JsonElement p)
     {
         ValidateProperties(p, "view", "sessionKey", "includeDetails");
-        var view = OptionalString(p, "view") ?? "configured";
-        if (view is not ("configured" or "all"))
-            throw new FixtureRequestException("INVALID_PARAMS", "view must be configured or all.");
+        var view = OptionalString(p, "view") ?? "default";
+        if (view is not ("default" or "configured" or "all"))
+            throw new FixtureRequestException("INVALID_PARAMS", "view must be default, configured or all.");
         var sessionKey = OptionalString(p, "sessionKey");
         if (sessionKey is not null && !ContainsSession(sessionKey))
             throw new FixtureRequestException("INVALID_PARAMS", "Unknown fixture session key.");
-        if (p.TryGetProperty("includeDetails", out _))
+        OptionalBoolean(p, "includeDetails");
+        if (!_publishedModelCatalog && p.TryGetProperty("includeDetails", out _))
             throw new FixtureRequestException("INVALID_PARAMS", "Fixture does not advertise published-model-catalog.");
+        if (sessionKey == EdgeSessionKey)
+        {
+            // Configured reads retain current-model metadata without granting manual selection.
+            return new
+            {
+                models = view == "default" ? [] : new[]
+                {
+                    new
+                    {
+                        id = "research", name = "Fixture Retained Research", provider = "fixture",
+                        contextWindow = 64_000, configured = true, available = true,
+                        manualSelectionAllowed = false,
+                        thinkingLevels = new[] { new { id = "high", label = "High" } },
+                    },
+                }
+            };
+        }
         if (sessionKey == OtherSessionKey)
         {
             return new

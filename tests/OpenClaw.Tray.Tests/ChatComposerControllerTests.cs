@@ -631,6 +631,35 @@ public sealed class ChatComposerControllerTests
     }
 
     [Fact]
+    public async Task ReconcileModelCatalog_InvalidationRecoversAfterUnavailableCatalog()
+    {
+        var (vm, controller, port, _) = MakeController();
+        using (controller)
+        using (vm)
+        {
+            port.SupportsSessionScopedModelCatalog = true;
+            port.SessionModelsBehavior = (_, _) => Task.FromResult<ModelsListInfo?>(null);
+            var inputs = MakeInputs(revision: 2, sessionModelCatalogEligible: true);
+            vm.ApplyInputs(inputs);
+            await controller.ReconcileModelCatalogAsync(inputs);
+            Assert.Equal(ChatModelCatalogStatus.Unavailable, vm.SessionModelCatalog?.Status);
+
+            port.SessionModelsBehavior = (_, _) => Task.FromResult<ModelsListInfo?>(new ModelsListInfo
+            {
+                Models = [new ModelInfo { Id = "worker", Name = "Worker" }],
+            });
+            port.ModelCatalogRevision++;
+            var refreshed = inputs with { Revision = 3, ModelCatalogRevision = port.ModelCatalogRevision };
+            vm.ApplyInputs(refreshed);
+            await controller.ReconcileModelCatalogAsync(refreshed);
+
+            Assert.Equal(ChatModelCatalogStatus.Ready, vm.SessionModelCatalog?.Status);
+            Assert.Equal("worker", Assert.Single(vm.SessionModelCatalog!.Choices).Id);
+            Assert.Equal(3, port.RequestedSessionModelKeys.Count);
+        }
+    }
+
+    [Fact]
     public async Task ReconcileModelCatalog_DistinguishesOpaqueFieldsContainingColons()
     {
         var (vm, controller, port, _) = MakeController();

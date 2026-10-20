@@ -132,6 +132,36 @@ public sealed class GatewayFixtureIsolationTests
     }
 
     [Fact]
+    public void Get_ModernRootAndMatchingLegacyAlias_ResolveTheSameEffectiveDirectory()
+    {
+        using var temp = new TempDirectory();
+        var environment = ValidEnvironment(temp);
+        environment[GatewayFixtureIsolation.LocalAppDataDirectoryEnvironmentVariable] = temp.Combine("local");
+        environment[GatewayFixtureIsolation.LocalDataDirectoryEnvironmentVariable] =
+            temp.Combine("local", "OpenClawTray") + Path.DirectorySeparatorChar;
+
+        var context = GatewayFixtureIsolation.Get(environment.GetValueOrDefault);
+
+        Assert.True(context.IsEnabled);
+        Assert.Equal(temp.Combine("local", "OpenClawTray"), context.LocalDataDirectory);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
+    }
+
+    [Fact]
+    public void Get_ModernRootCannotShadowADifferentValidatedLegacyDirectory()
+    {
+        using var temp = new TempDirectory();
+        var environment = ValidEnvironment(temp);
+        environment[GatewayFixtureIsolation.LocalAppDataDirectoryEnvironmentVariable] = temp.Combine("local");
+
+        var error = Assert.Throws<InvalidOperationException>(
+            () => GatewayFixtureIsolation.Get(environment.GetValueOrDefault));
+
+        Assert.Contains("match", error.Message);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(temp.Path));
+    }
+
+    [Fact]
     public void Get_ReturnsCanonicalRootsWithoutCreatingThem()
     {
         using var temp = new TempDirectory();
