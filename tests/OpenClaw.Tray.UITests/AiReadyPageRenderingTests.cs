@@ -37,7 +37,7 @@ public sealed class AiReadyPageRenderingTests(UIThreadFixture ui, ITestOutputHel
                 GetConnectionManager: () => null, GetGatewayRegistry: () => null,
                 GetSettings: () => null, GetGatewayDirectConnectService: () => null,
                 GetLocalAiRuntime: () => null, GetNodeService: () => null,
-                GetVoiceService: () => null, GetPageActivator: () => null,
+                GetPageActivator: () => null,
                 GetPendingChatSessionKey: () => null, GetStartupArgs: () => null,
                 IsDeepLinkArg: _ => false, RequiresSetup: () => false,
                 Connect: () => { }, Disconnect: () => { },

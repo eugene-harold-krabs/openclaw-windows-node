@@ -1398,7 +1398,7 @@ public sealed class OnboardingAiPageTests(UIThreadFixture ui, ITestOutputHelper 
             await WaitAsync(() => host.Observations == 1 && Find<Button>(page, "RefreshButton").IsEnabled);
             var render = typeof(AiSetupPage).GetMethod("Render", BindingFlags.Instance | BindingFlags.NonPublic)!;
             render.Invoke(page, null);
-            Assert.Equal("Connect your AI", Find<TextBlock>(page, "TitleText").Text);
+            Assert.Equal("Set up your AI", Find<TextBlock>(page, "TitleText").Text);
             var release = typeof(AiSetupPage).GetMethod("ReleaseAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
             await Assert.IsAssignableFrom<Task>(release.Invoke(page, [CancellationToken.None]));
             render.Invoke(page, null);
