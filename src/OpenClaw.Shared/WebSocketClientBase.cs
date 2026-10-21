@@ -156,6 +156,10 @@ public abstract class WebSocketClientBase : IDisposable
     public Func<CancellationToken, Task<ReconnectAuthorizationResult>>?
         ReconnectAuthorizationAsync { get; set; }
 
+    /// <summary>Independent proxy credential for the HTTP upgrade, pinned to a TLS origin.</summary>
+    public string? ProxyBearerToken { get; set; }
+    public string? ProxyBearerOrigin { get; set; }
+
     /// <summary>Reset reconnect backoff counter. Call after successful application-level handshake.</summary>
     protected void ResetReconnectAttempts() => _reconnectAttempts = 0;
 
@@ -213,11 +217,12 @@ public abstract class WebSocketClientBase : IDisposable
     /// <summary>Maximum time allowed for one WebSocket HTTP upgrade attempt.</summary>
     protected virtual TimeSpan ConnectAttemptTimeout => DefaultConnectAttemptTimeout;
 
-    protected WebSocketClientBase(string gatewayUrl, string token, IOpenClawLogger? logger = null)
+    protected WebSocketClientBase(string gatewayUrl, string token, IOpenClawLogger? logger = null,
+        bool allowEmptyGatewayToken = false)
     {
         if (string.IsNullOrEmpty(gatewayUrl))
             throw new ArgumentException("Gateway URL is required.", nameof(gatewayUrl));
-        if (string.IsNullOrEmpty(token))
+        if (string.IsNullOrEmpty(token) && !allowEmptyGatewayToken)
             throw new ArgumentException("Token is required.", nameof(token));
 
         _gatewayUrl = GatewayUrlHelper.NormalizeForWebSocket(gatewayUrl);
@@ -283,7 +288,15 @@ public abstract class WebSocketClientBase : IDisposable
             var origin = $"{originScheme}://{uri.Host}:{uri.Port}";
             ws.Options.SetRequestHeader("Origin", origin);
 
-            if (!string.IsNullOrEmpty(_credentials))
+            if (!string.IsNullOrEmpty(ProxyBearerToken))
+            {
+                if (uri.Scheme != "wss" || !string.IsNullOrEmpty(_credentials) ||
+                    !string.Equals(uri.GetLeftPart(UriPartial.Authority), ProxyBearerOrigin,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The proxy Bearer credential is not authorized for this WebSocket origin.");
+                ws.Options.SetRequestHeader("Authorization", $"Bearer {ProxyBearerToken}");
+            }
+            else if (!string.IsNullOrEmpty(_credentials))
             {
                 var credentialsToEncode = GatewayUrlHelper.DecodeCredentials(_credentials);
                 ws.Options.SetRequestHeader(
