@@ -8092,4 +8092,16 @@ Ga na inschrijving terug naar Instellingen &gt; Windows Update en controleer op 
   <data name="Chat_Welcome_SummarizeRecentSessions" xml:space="preserve"><value>Vat mijn recente sessies samen</value></data>
   <data name="Chat_Welcome_ConfigureChannel" xml:space="preserve"><value>Help me een kanaal te configureren</value></data>
   <data name="Chat_Welcome_CheckSystemHealth" xml:space="preserve"><value>Controleer de systeemstatus</value></data>
+  <data name="ConnectionPage_ProxyBearerToken.Header" xml:space="preserve">
+    <value>Proxy-Bearer-token (optioneel)</value>
+  </data>
+  <data name="ConnectionPage_ProxyBearerToken.PlaceholderText" xml:space="preserve">
+    <value>Plak een afzonderlijk proxytoken</value>
+  </data>
+  <data name="ConnectionPage_ClearProxyBearerToken.Content" xml:space="preserve">
+    <value>Opgeslagen proxytoken verwijderen</value>
+  </data>
+  <data name="ConnectionPage_ProxyLoginRedirect" xml:space="preserve">
+    <value>Gateway verwijst door naar de proxy-aanmelding. Configureer een Proxy-Bearer-token.</value>
+  </data>
 </root>
