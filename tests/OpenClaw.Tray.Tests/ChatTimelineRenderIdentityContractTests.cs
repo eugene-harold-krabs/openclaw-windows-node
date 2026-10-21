@@ -88,7 +88,7 @@ public sealed class ChatTimelineRenderIdentityContractTests
         Assert.Contains(".IsEnabled(enabled)", composer);
         Assert.Equal(3, Regex.Matches(composer, @"inputs\.CanChangeSessionOptions").Count);
         Assert.Contains("var canChangeThinking = inputs.CanChangeSessionOptions", composer);
-        Assert.Contains("!inputs.MessageOptionsDisabled && inputs.AvailableChannels.Count > 1", composer);
+        Assert.Contains("var thinkingLevels = vm.ThinkingProfile?.Levels?.ToArray() ?? [];", composer);
     }
 
     [Fact]

@@ -26,7 +26,7 @@ public class ReactorSlashCommandSourceContractTests
     {
         var controller = ReadSource("ChatComposerController.cs");
 
-        Assert.Contains("++_commandCatalogOperation;", controller);
+        Assert.DoesNotMatch(@"\b_catalogOperation\b", controller);
         Assert.Contains("FireAndForget(_ => _port.EnsureCommandCatalogAsync(_lifetimeToken));", controller);
     }
 

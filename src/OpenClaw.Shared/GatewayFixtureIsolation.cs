@@ -37,7 +37,9 @@ public static class GatewayFixtureIsolation
         var localDataDirectory = ValidateAbsoluteDirectory(
             getEnvironmentVariable(LocalDataDirectoryEnvironmentVariable), LocalDataDirectoryEnvironmentVariable);
 
-        // Match SetupContext's modern-root precedence without validating an unused alias.
+        // SetupContext.ResolveLocalDataDir gives the modern root precedence and
+        // appends OpenClawTray. The legacy alias must describe that same effective
+        // directory, not a second validated-but-unused setup directory.
         if (getEnvironmentVariable(LocalAppDataDirectoryEnvironmentVariable) is { Length: > 0 } root)
         {
             var localRoot = ValidateAbsoluteDirectory(root, LocalAppDataDirectoryEnvironmentVariable);
