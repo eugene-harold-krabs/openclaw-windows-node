@@ -1019,6 +1019,8 @@
                                      AutomationProperties.AutomationId="AddProxyBearerToken"/>
                         <CheckBox x:Uid="ConnectionPage_ClearProxyBearerToken" x:Name="DirectClearProxyBearerCheckBox"
                                   Content="Remove saved proxy token"
+                                  Checked="OnDirectProxyBearerChanged"
+                                  Unchecked="OnDirectProxyBearerChanged"
                                   AutomationProperties.AutomationId="RemoveProxyBearerToken"/>
                         <TextBlock x:Uid="ConnectionPage_TokenOrPasswordHint" x:Name="DirectAuthHintText"
                                    Text="Paste a shared gateway token, or leave it blank to pair with a setup code."
